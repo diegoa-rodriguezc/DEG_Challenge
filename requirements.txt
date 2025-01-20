@@ -1,0 +1,8 @@
+fastapi
+joblib
+markdown
+pandas
+psycopg2
+python-multipart
+sqlalchemy
+uvicorn
