@@ -1,7 +1,6 @@
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
-import pandas as pd
 from models import Department, Job, Employee
-from datetime import datetime
 
 def create_departments(db: Session, departments_data: list):
     departments = [Department(id=id,department=dep) for id,dep in departments_data.itertuples(index=False, name=None)]
@@ -22,43 +21,79 @@ def get_employees(db: Session):
     employees = db.query(Employee)
     return employees
 
-
-
 def get_employees_by_quarter(db: Session):
-    # Filtrar los empleados contratados en 2021
-    start_date = datetime(2021, 1, 1)
-    end_date = datetime(2021, 12, 31)
-    
-    employees = db.query(Employee).filter(Employee.datetime_ >= start_date, Employee.datetime_ <= end_date).all()
+    result = db.query(
+        Department.department,
+        Job.job,
+        func.sum(
+            case(
+                (func.extract('quarter', Employee.datetime_) == 1, 1),  # Condición para Q1
+                else_=0
+            )
+        ).label("Q1"),
+        func.sum(
+            case(
+                (func.extract('quarter', Employee.datetime_) == 2, 1),  # Condición para Q2
+                else_=0
+            )
+        ).label("Q2"),
+        func.sum(
+            case(
+                (func.extract('quarter', Employee.datetime_) == 3, 1),  # Condición para Q3
+                else_=0
+            )
+        ).label("Q3"),
+        func.sum(
+            case(
+                (func.extract('quarter', Employee.datetime_) == 4, 1),  # Condición para Q4
+                else_=0
+            )
+        ).label("Q4")
+    ).join(
+        Employee, Employee.department_id == Department.id
+    ).join(
+        Job, Employee.job_id == Job.id
+    ).filter(
+        func.extract('year', Employee.datetime_) == 2021
+    ).group_by(
+        Department.department, Job.job
+    ).order_by(
+        Department.department, Job.job
+    ).all()
 
-    # Crear un DataFrame de pandas
-    data = []
-    for emp in employees:
-        department_name = emp.department.department
-        job_name = emp.job.job
-        hire_date = emp.datetime_
+    return result
 
-        # Identificar el trimestre en el que fue contratado el empleado
-        if hire_date.month in [1, 2, 3]:
-            quarter = 'Q1'
-        elif hire_date.month in [4, 5, 6]:
-            quarter = 'Q2'
-        elif hire_date.month in [7, 8, 9]:
-            quarter = 'Q3'
-        else:
-            quarter = 'Q4'
-        
-        data.append([department_name, job_name, quarter])
-    
-    df = pd.DataFrame(data, columns=['department', 'job', 'quarter'])
-    
-    # Obtener el número de empleados por departamento, trabajo y trimestre
-    result = df.groupby(['department', 'job', 'quarter']).size().unstack(fill_value=0)
-    
-    # Ordenar el resultado alfabéticamente por departamento y trabajo
-    result = result.sort_index(axis=0).sort_index(axis=1)
-    
-    # Convertir el resultado a formato diccionario para la respuesta de la API
-    result_dict = result.to_dict(orient='index')
-    
-    return result_dict
+def get_departments_average(db: Session):
+    count_employees = (
+        db.query(
+            Employee.department_id, 
+            func.count(Employee.id).label("cont")
+            )
+        .join(Department, Employee.department_id==Department.id)
+        .filter(func.extract("year", Employee.datetime_) == 2021)
+        .group_by(Employee.department_id)
+        .subquery()
+    )
+
+    average = (
+        db.query(
+            func.avg(count_employees.c.cont).label("average")
+            )
+        .scalar_subquery()
+    )
+
+    result = (
+        db.query(
+            Department.id,
+            Department.department,
+            func.count(Employee.id).label("hired")
+        )
+        .join(Employee, Employee.department_id == Department.id)
+        .filter(func.extract("year", Employee.datetime_) == 2021)
+        .group_by(Department.id)
+        .having(func.count(Employee.id) > average)
+        .order_by(func.count(Employee.id).desc())
+        .all()
+    )
+
+    return result
