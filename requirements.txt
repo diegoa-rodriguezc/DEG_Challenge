@@ -3,6 +3,7 @@ joblib
 markdown
 pandas
 psycopg2
+pyodbc
 python-multipart
 sqlalchemy
 uvicorn
